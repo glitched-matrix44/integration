@@ -30,6 +30,7 @@ class IntegrationConfigController extends Controller
             $consumerKey = $integration->getMeta('consumer_key');
             $consumerSecret = $integration->getMeta('consumer_secret');
             $isActive = $integration->getMeta('is_active');
+            $chatbot_vector = $integration->getMeta('chatbot_vector');
 
             Log::info('Loading Integration Configuration', [
                 'integration_uid' => $integrationUid,
@@ -56,10 +57,7 @@ class IntegrationConfigController extends Controller
                         'integration::integrations.gautams_bot.configure',
                         compact(
                             'integration',
-                            'websiteUrl',
-                            'consumerKey',
-                            'consumerSecret',
-                            'isActive'
+                            'chatbot_vector'
                         )
                     );
                 default:

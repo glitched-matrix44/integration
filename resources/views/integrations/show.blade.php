@@ -80,44 +80,38 @@
         use Illuminate\Support\Str;
     @endphp
 
-    @if($integration->metas->isNotEmpty())
-        <div class="mb-3">
+    @foreach($integration->metas as $meta)
 
-            @foreach($integration->metas as $meta)
-                @php
-                    $isUrl    = $meta->meta_key === 'url';
-                    $isSecret = Str::contains($meta->meta_key, ['token', 'key', 'secret']);
+        @if($meta->meta_key === 'chatbot_vector')
+            @continue
+        @endif
 
-                    $displayValue = $isSecret
-                        ? Str::mask($meta->meta_value, '*', 0, max(strlen($meta->meta_value) - 4, 0))
-                        : $meta->meta_value;
-                @endphp
+        @php
+            $isUrl    = $meta->meta_key === 'url';
+            $isSecret = Str::contains($meta->meta_key, ['token', 'key', 'secret']);
 
-                <div class="d-flex align-items-center justify-content-start gap-2">
+            $displayValue = $isSecret
+                ? Str::mask($meta->meta_value, '*', 0, max(strlen($meta->meta_value) - 4, 0))
+                : $meta->meta_value;
+        @endphp
 
-                    {{-- Key --}}
-                    <div class="text-muted text-nowrap">
-                        {{ Str::headline($meta->meta_key) }} :
-                    </div>
+        <div class="d-flex align-items-center justify-content-start gap-2">
+            <div class="text-muted text-nowrap">
+                {{ Str::headline($meta->meta_key) }} :
+            </div>
 
-                    {{-- Value --}}
-                    <div class=" text-break"
-                        id="meta-{{ $meta->id }}">
-                        <code>{{ $displayValue }}</code>
-                    </div>
+            <div class="text-break" id="meta-{{ $meta->id }}">
+                <code>{{ $displayValue }}</code>
+            </div>
 
-                    {{-- Copy ONLY for URL --}}
-                    @if($isUrl)
-                        <i class="fas fa-copy text-muted copy-icon ms-2"
-                        onclick="copyText('meta-{{ $meta->id }}', this)"
-                        title="Copy URL"></i>
-                    @endif
-
-                </div>
-            @endforeach
-
+            @if($isUrl)
+                <i class="fas fa-copy text-muted copy-icon ms-2"
+                onclick="copyText('meta-{{ $meta->id }}', this)"
+                title="Copy URL"></i>
+            @endif
         </div>
-    @endif
+
+    @endforeach
     
     <div>
         Channel section

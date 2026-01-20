@@ -56,8 +56,8 @@
         </span>
     </div>
 
-    <table class="table table-bordered table-striped align-middle">
-        <thead class="table-light">
+    <table class="table table-bordered table-striped align-middle mb-4">
+        <thead>
             <tr>
                 <th>Purpose</th>
                 <th>Method</th>
@@ -78,4 +78,12 @@
         </tbody>
     </table>
 
+    <hr class="my-3">
+
+    @include('integration::components.inc-with-props.json-config-editor', [
+        'configData' => $chatbot_vector,
+        // 'saveUrl' => route('#'),
+        'title' => 'Chatbot Vector',
+        'method' => 'POST'
+    ])
 @endsection
