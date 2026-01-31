@@ -7,6 +7,7 @@ use Illuminate\Routing\Controller;
 use Iquesters\Integration\Models\Integration;
 use Illuminate\Support\Facades\Log;
 use Iquesters\Integration\Constants\Constants;
+use Iquesters\Integration\Jobs\SyncVectorJob;
 use Iquesters\Integration\Models\IntegrationMeta;
 
 class IntegrationConfigController extends Controller
@@ -100,7 +101,18 @@ class IntegrationConfigController extends Controller
                 'status'     => 'active',
                 'updated_by' => $userId,
             ]);
-
+            $provider = $integration->supportedIntegration;
+            
+            $payload = [
+                'integration_uid' => $integration->uid,
+                'url' => $request->url,
+                'consumer_key' => $request->consumer_key,
+                'consumer_secret' => $request->consumer_secret,
+                'integration_provider' => $provider->name,
+            ];
+            
+            SyncVectorJob::dispatch($payload);
+            
             return response()->json([
                 'success'  => true,
                 'redirect' => route('integration.show', $integration->uid),

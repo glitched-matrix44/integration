@@ -9,6 +9,8 @@ use Iquesters\Foundation\Enums\Module;
 use Illuminate\Support\Facades\Route;
 use Iquesters\Integration\Config\IntegrationConf;
 use Iquesters\Integration\Database\Seeders\IntegrationSeeder;
+use Iquesters\Integration\Services\VectorJobDispatcher;
+use Illuminate\Console\Scheduling\Schedule;
 
 class IntegrationServiceProvider extends ServiceProvider
 {
@@ -30,6 +32,9 @@ class IntegrationServiceProvider extends ServiceProvider
         
         $this->registerAssetRoute();
         
+        // Register scheduler for sync vector job
+        $this->registerScheduler();
+    
         // Publish config
         $this->publishes([
             __DIR__ . '/../config/integration.php' => config_path('integration.php'),
@@ -152,4 +157,30 @@ class IntegrationServiceProvider extends ServiceProvider
         return route('integration.asset', ['path' => $path]);
     }
 
+
+    protected function registerScheduler(): void
+    {
+        // Only run in console (artisan schedule:run)
+        if (! $this->app->runningInConsole()) {
+            return;
+        }
+
+        $this->app->booted(function () {
+            /** @var Schedule $schedule */
+            $schedule = $this->app->make(Schedule::class);
+
+            $conf = ConfProvider::from(Module::INTEGRATION);
+
+            if (! $conf->vector_sync_enabled) {
+                return;
+            }
+
+            $schedule->call(function () {
+                VectorJobDispatcher::dispatchForAllActive();
+            })
+                ->dailyAt($conf->vector_sync_schedule_time)
+                ->timezone('UTC')
+                ->name('daily-woocommerce-vector-sync');
+        });
+    }
 }
