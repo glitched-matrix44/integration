@@ -44,7 +44,7 @@ class SyncVectorJob extends BaseJob
                     'read_timeout' => 0,
                 ])
                 ->post(
-                    'http://72.61.226.198:8091/vector/create',
+                    'https://api-jobs.iquesters.com/vector/create',
                     $payload
                 );
 
