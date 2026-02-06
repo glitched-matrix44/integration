@@ -6,10 +6,14 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Iquesters\Foundation\Jobs\BaseJob;
 use Iquesters\Integration\Constants\Constants;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class SyncVectorJob extends BaseJob
 {
     protected array $integrationPayload;
+    protected ?\Carbon\Carbon $startedAt = null;
 
     protected function initialize(...$arguments): void
     {
@@ -23,6 +27,7 @@ class SyncVectorJob extends BaseJob
     public function process(): void
     {
         try {
+            $this->startedAt = now();
             Log::info('Starting vector sync job', [
                 'integration_uid' => $this->integrationPayload['integration_uid'],
                 'provider' => $this->integrationPayload['integration_provider'],
@@ -39,7 +44,7 @@ class SyncVectorJob extends BaseJob
                     'read_timeout' => 0,
                 ])
                 ->post(
-                    'http://localhost:8001/vector/create?stream=true',
+                    'http://72.61.226.198:8091/vector/create',
                     $payload
                 );
 
@@ -73,6 +78,47 @@ class SyncVectorJob extends BaseJob
             throw $e;
         }
     }
+    
+    protected function afterHandle(): void
+    {
+        parent::afterHandle();
+
+        if (! Schema::hasTable('vector_responses')) {
+            return;
+        }
+
+        if ($this->getResponse() === null) {
+            return;
+        }
+
+        try {
+            $finishedAt = now();
+
+            $duration = $this->startedAt
+                ? abs((int) $this->startedAt->diffInSeconds($finishedAt))
+                : null;
+
+            DB::table('vector_responses')->insert([
+                'uid'              => (string) Str::ulid(),
+                'integration_id'   => $this->integrationPayload['integration_id'],
+                'job_uuid'         => $this->job?->getJobId(),
+                'response'         => json_encode($this->getResponse()),
+                'started_at'       => $this->startedAt,
+                'finished_at'      => $finishedAt,
+                'duration_seconds' => $duration,
+                'status'           => 'active',
+                'created_by'       => 0,
+                'updated_by'       => 0,
+                'created_at'       => now(),
+                'updated_at'       => now(),
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Vector response DB insert failed', [
+                'job_id' => $this->job?->getJobId(),
+                'error'  => $e->getMessage(),
+            ]);
+        }
+    }
 
     /**
      * Build vector API payload based on provider
@@ -95,7 +141,7 @@ class SyncVectorJob extends BaseJob
     private function wooCommercePayload(): array
     {
         return [
-            'company_code' => $this->resolveCompanyCode(),
+            'company_id' => $this->resolveCompanyCode(),
 
             'systems' => [
                 'system' => Constants::WOOCOMMERCE,
@@ -126,19 +172,24 @@ class SyncVectorJob extends BaseJob
         $url = $this->integrationPayload['url'] ?? null;
 
         if (! $url) {
-            return 'UNKN';
+            return '456789'; // default fallback
         }
 
         $host = parse_url($url, PHP_URL_HOST);
 
         if (! $host) {
-            return 'UNKN';
+            return '456789';
         }
 
-        // Remove "www." if present
-        $host = preg_replace('/^www\./', '', $host);
+        // Normalize host (remove www.)
+        $host = preg_replace('/^www\./', '', strtolower($host));
 
-        return strtoupper(substr($host, 0, 4));
+        return match ($host) {
+            'gigigadgets.com' => '456789',
+            'nams.store',
+            'nams.design'     => '123456',
+            default           => '456789',
+        };
     }
 
 }

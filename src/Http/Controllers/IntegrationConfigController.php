@@ -104,6 +104,7 @@ class IntegrationConfigController extends Controller
             $provider = $integration->supportedIntegration;
             
             $payload = [
+                'integration_id' => $integration->id,
                 'integration_uid' => $integration->uid,
                 'url' => $request->url,
                 'consumer_key' => $request->consumer_key,

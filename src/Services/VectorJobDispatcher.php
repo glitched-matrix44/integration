@@ -40,6 +40,7 @@ class VectorJobDispatcher
         ]);
 
         SyncVectorJob::dispatch([
+            'integration_id' => $integration->id,
             'integration_uid'      => $integration->uid,
             'url'                  => $integration->getMeta('website_url'),
             'consumer_key'         => $integration->getMeta('consumer_key'),
