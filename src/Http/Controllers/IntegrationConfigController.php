@@ -105,11 +105,14 @@ class IntegrationConfigController extends Controller
             
             $payload = [
                 'integration_id' => $integration->id,
-                'integration_uid' => $integration->uid,
-                'url' => $request->url,
-                'consumer_key' => $request->consumer_key,
-                'consumer_secret' => $request->consumer_secret,
-                'integration_provider' => $provider->name,
+
+                'systems' => [
+                    [
+                        'integration_provider' => $provider->name,
+                        'integration_uid'      => $integration->uid,
+                        'recreate_flag'        => false,
+                    ]
+                ],
             ];
             
             SyncVectorJob::dispatch($payload);

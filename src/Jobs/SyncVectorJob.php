@@ -3,15 +3,16 @@
 namespace Iquesters\Integration\Jobs;
 
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Log;
 use Iquesters\Foundation\Jobs\BaseJob;
-use Iquesters\Integration\Constants\Constants;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Iquesters\Foundation\System\Traits\Loggable;
 
 class SyncVectorJob extends BaseJob
 {
+    use Loggable;
+
     protected array $integrationPayload;
     protected ?\Carbon\Carbon $startedAt = null;
 
@@ -22,68 +23,65 @@ class SyncVectorJob extends BaseJob
     }
 
     /**
-     * Handle the job – Sync integration data to Vector service
+     * Main job handler
      */
     public function process(): void
     {
         try {
             $this->startedAt = now();
-            Log::info('Starting vector sync job', [
-                'integration_uid' => $this->integrationPayload['integration_uid'],
-                'provider' => $this->integrationPayload['integration_provider'],
-            ]);
+            $this->logMethodStart('Vector sync job started');
 
-            // Build provider-specific payload
             $payload = $this->buildProviderPayload();
 
-            Log::debug('Calling vector API with payload: ' . json_encode($payload));
+            $this->logDebug('Vector request payload: ' . json_encode($payload));
 
             $response = Http::timeout(0)
                 ->withOptions([
                     'connect_timeout' => 10,
-                    'read_timeout' => 0,
+                    'read_timeout'    => 0,
                 ])
                 ->post(
                     'https://api-jobs.iquesters.com/vector/create',
                     $payload
                 );
 
-            Log::info('Vector API response received', [
-                'status' => $response->status(),
-                'response' => $response->json(),
-            ]);
+            $this->logInfo(
+                'Vector API response received | status=' . $response->status() .
+                ' | body=' . $response->body()
+            );
 
             if (! $response->successful()) {
-                Log::error('Vector API call failed', [
-                    'status' => $response->status(),
-                    'response' => $response->json(),
-                ]);
+                $status = $response->status();
+                $body   = $response->body();
+
+                $this->logError(
+                    'Vector API call failed | status=' . $status .
+                    ' | body=' . $body
+                );
+
                 return;
             }
 
             $this->setResponse($response->json());
 
-            Log::info('Vector sync completed successfully', [
-                'integration_uid' => $this->integrationPayload['integration_uid'],
-                'provider' => $this->integrationPayload['integration_provider'],
-            ]);
+            $this->logMethodEnd('Vector sync completed successfully');
 
         } catch (\Throwable $e) {
-            Log::error('SyncVectorJob failed', [
-                'integration_uid' => $this->integrationPayload['integration_uid'],
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
+            $this->logError('Vector sync failed: '.$e->getMessage(), [
+                'trace' => $e->getTraceAsString()
             ]);
-
             throw $e;
         }
     }
-    
+
+    /**
+     * Runs after job execution
+     */
     protected function afterHandle(): void
     {
         parent::afterHandle();
 
-        if (! Schema::hasTable('vector_responses')) {
+        if (!Schema::hasTable('vector_responses')) {
             return;
         }
 
@@ -100,7 +98,7 @@ class SyncVectorJob extends BaseJob
 
             DB::table('vector_responses')->insert([
                 'uid'              => (string) Str::ulid(),
-                'integration_id'   => $this->integrationPayload['integration_id'],
+                'integration_id'   => $this->integrationPayload['integration_id'] ?? null,
                 'job_uuid'         => $this->job?->getJobId(),
                 'response'         => json_encode($this->getResponse()),
                 'started_at'       => $this->startedAt,
@@ -112,84 +110,83 @@ class SyncVectorJob extends BaseJob
                 'created_at'       => now(),
                 'updated_at'       => now(),
             ]);
+
         } catch (\Throwable $e) {
-            Log::warning('Vector response DB insert failed', [
-                'job_id' => $this->job?->getJobId(),
-                'error'  => $e->getMessage(),
-            ]);
+            $this->logWarning('Vector response insert failed: '.$e->getMessage());
         }
     }
 
     /**
-     * Build vector API payload based on provider
+     * Build final vector payload
      */
     private function buildProviderPayload(): array
     {
-        return match ($this->integrationPayload['integration_provider']) {
-            Constants::WOOCOMMERCE => $this->wooCommercePayload(),
+        try {
+            $systems = $this->buildSystemsPayload();
 
-            default => throw new \InvalidArgumentException(
-                'Unsupported integration provider: '
-                . $this->integrationPayload['integration_provider']
-            ),
-        };
+            if (empty($systems)) {
+                throw new \RuntimeException('Vector payload has no systems to sync');
+            }
+
+            return [
+                'systems' => $systems,
+            ];
+
+        } catch (\Throwable $e) {
+            $this->logError('Failed to build vector payload: '.$e->getMessage());
+            throw $e;
+        }
     }
 
     /**
-     * WooCommerce → Vector payload
+     * Build systems list
      */
-    private function wooCommercePayload(): array
+    private function buildSystemsPayload(): array
     {
-        return [
-            'company_id' => $this->resolveCompanyCode(),
+        try {
+            // allow single payload or systems array
+            $items = $this->integrationPayload['systems']
+                ?? [$this->integrationPayload];
 
-            'systems' => [
-                'system' => Constants::WOOCOMMERCE,
+            if (!is_array($items)) {
+                throw new \InvalidArgumentException('Systems payload must be an array');
+            }
 
-                'credentials' => [
-                    'url'     => $this->integrationPayload['url'],
-                    'userid'  => $this->integrationPayload['consumer_key'],
-                    'api_key' => $this->integrationPayload['consumer_secret'],
-                ],
-            ],
-        ];
-    }
+            $systems = [];
 
-    /**
-     * TEMP LOGIC:
-     * Currently deriving company_code from integration URL.
-     *
-     * Example:
-     * https://example.com → EXAM
-     *
-     * TODO:
-     * In future, do NOT derive company_code from URL.
-     * Instead, pass and use integration_uid directly
-     * for vector identification.
-     */
-    private function resolveCompanyCode(): string
-    {
-        $url = $this->integrationPayload['url'] ?? null;
+            foreach ($items as $index => $item) {
 
-        if (! $url) {
-            return '456789'; // default fallback
+                if (empty($item['integration_provider'])) {
+                    throw new \InvalidArgumentException(
+                        "Missing integration_provider at index {$index}"
+                    );
+                }
+
+                if (empty($item['integration_uid'])) {
+                    throw new \InvalidArgumentException(
+                        "Missing integration_uid at index {$index}"
+                    );
+                }
+
+                $systems[] = [
+                    'system'           => $item['integration_provider'],
+                    'integration_uid' => $item['integration_uid'],
+                    'recreate_flag'    => (bool) ($item['recreate_flag'] ?? false),
+                ];
+            }
+
+            if (empty($systems)) {
+                throw new \RuntimeException('No valid systems found for vector payload');
+            }
+
+            return $systems;
+
+        } catch (\Throwable $e) {
+
+            $this->logError('Failed to build systems payload: '.$e->getMessage());
+            $this->logDebug('Payload received', $this->integrationPayload);
+
+            throw $e;
         }
-
-        $host = parse_url($url, PHP_URL_HOST);
-
-        if (! $host) {
-            return '456789';
-        }
-
-        // Normalize host (remove www.)
-        $host = preg_replace('/^www\./', '', strtolower($host));
-
-        return match ($host) {
-            'gigigadgets.com' => '456789',
-            'nams.store',
-            'nams.design'     => '123456',
-            default           => '456789',
-        };
     }
-
 }

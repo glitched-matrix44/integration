@@ -2,51 +2,71 @@
 
 namespace Iquesters\Integration\Services;
 
-use Illuminate\Support\Facades\Log;
 use Iquesters\Integration\Models\Integration;
 use Iquesters\Integration\Constants\Constants;
 use Iquesters\Integration\Jobs\SyncVectorJob;
 use Iquesters\Foundation\Support\ConfProvider;
 use Iquesters\Foundation\Enums\Module;
+use Iquesters\Foundation\System\Traits\Loggable;
 
 class VectorJobDispatcher
 {
+    use Loggable;
+
     /**
      * Dispatch vector sync job for a single integration
      */
     public static function dispatchForIntegration(Integration $integration): void
     {
-        $provider = $integration->supportedIntegration;
+        $logger = new self();
 
-        if (! $provider) {
-            Log::warning('Vector sync skipped: supportedIntegration missing', [
-                'integration_uid' => $integration->uid,
-            ]);
-            return;
-        }
+        try {
+            $provider = $integration->supportedIntegration;
 
-        // Only WooCommerce for now
-        if ($provider->name !== Constants::WOOCOMMERCE) {
-            Log::info('Vector sync skipped: unsupported provider', [
+            if (! $provider) {
+                $logger->logWarning('supportedIntegration missing', [
+                    'integration_uid' => $integration->uid,
+                ]);
+                return;
+            }
+
+            $supportedProviders = [
+                Constants::WOOCOMMERCE,
+                // add new ecom providers here later
+            ];
+
+            if (! in_array($provider->name, $supportedProviders, true)) {
+                $logger->logInfo('Vector sync skipped: unsupported provider', [
+                    'integration_uid' => $integration->uid,
+                    'provider'        => $provider->name,
+                ]);
+                return;
+            }
+
+            $payload = [
+                'integration_id'       => $integration->id,
+                'integration_uid'      => $integration->uid,
+                'url'                  => $integration->getMeta('website_url'),
+                'consumer_key'         => $integration->getMeta('consumer_key'),
+                'consumer_secret'      => $integration->getMeta('consumer_secret'),
+                'integration_provider' => $provider->name,
+            ];
+
+            $logger->logInfo('Dispatching vector sync job', [
                 'integration_uid' => $integration->uid,
                 'provider'        => $provider->name,
             ]);
-            return;
+
+            $logger->logDebug('Dispatch payload', $payload);
+
+            SyncVectorJob::dispatch($payload);
+
+        } catch (\Throwable $e) {
+            $logger->logError('Failed to dispatch vector job: '.$e->getMessage(), [
+                'integration_uid' => $integration->uid ?? null,
+                'trace'           => $e->getTraceAsString(),
+            ]);
         }
-
-        Log::info('Dispatching vector sync job', [
-            'integration_uid' => $integration->uid,
-            'provider'        => $provider->name,
-        ]);
-
-        SyncVectorJob::dispatch([
-            'integration_id' => $integration->id,
-            'integration_uid'      => $integration->uid,
-            'url'                  => $integration->getMeta('website_url'),
-            'consumer_key'         => $integration->getMeta('consumer_key'),
-            'consumer_secret'      => $integration->getMeta('consumer_secret'),
-            'integration_provider' => $provider->name,
-        ]);
     }
 
     /**
@@ -54,58 +74,79 @@ class VectorJobDispatcher
      */
     public static function dispatchForAllActive(): void
     {
-        $conf = ConfProvider::from(Module::INTEGRATION);
+        $logger = new self();
 
-        if (! $conf->vector_sync_enabled) {
-            Log::info('Vector sync scheduler disabled via config');
-            return;
-        }
+        try {
+            $conf = ConfProvider::from(Module::INTEGRATION);
 
-        Log::info('Starting scheduled vector sync dispatch');
+            if (! $conf->vector_sync_enabled) {
+                $logger->logInfo('Vector sync scheduler disabled via config');
+                return;
+            }
 
-        Integration::with('supportedIntegration')
-            ->where('status', Constants::ACTIVE)
-            ->whereHas('supportedIntegration', function ($q) {
-                $q->where('name', Constants::WOOCOMMERCE);
-            })
-            ->chunkById(50, function ($integrations) {
+            $logger->logMethodStart('Scheduled vector dispatch started');
 
-                foreach ($integrations as $integration) {
+            Integration::with('supportedIntegration')
+                ->where('status', Constants::ACTIVE)
+                ->whereHas('supportedIntegration', function ($q) {
+                    $q->where('name', Constants::WOOCOMMERCE);
+                })
+                ->chunkById(50, function ($integrations) use ($logger) {
 
-                    if ($integration->getMeta('vector_sync_enabled') === '0') {
-                        Log::info('Vector sync skipped: disabled at integration level', [
-                            'integration_uid' => $integration->uid,
-                        ]);
-                        continue;
+                    foreach ($integrations as $integration) {
+
+                        if ($integration->getMeta('vector_sync_enabled') === '0') {
+                            $logger->logInfo('Vector sync disabled for integration', [
+                                'integration_uid' => $integration->uid,
+                            ]);
+                            continue;
+                        }
+
+                        self::dispatchForIntegration($integration);
                     }
+                });
 
-                    self::dispatchForIntegration($integration);
-                }
-            });
+            $logger->logMethodEnd('Scheduled vector dispatch completed');
 
-        Log::info('Scheduled vector sync dispatch completed');
+        } catch (\Throwable $e) {
+            $logger->logError('Scheduled dispatch failed: '.$e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+            ]);
+        }
     }
 
     /**
-     * Dispatch vector sync job for manual trigger via UI
+     * Dispatch vector sync job for manual trigger
      */
     public static function dispatchManual(Integration $integration): bool
     {
-        $conf = ConfProvider::from(Module::INTEGRATION);
+        $logger = new self();
 
-        if (! $conf->vector_sync_manual_allowed) {
-            Log::warning('Manual vector sync blocked by config', [
+        try {
+            $conf = ConfProvider::from(Module::INTEGRATION);
+
+            if (! $conf->vector_sync_manual_allowed) {
+                $logger->logWarning('Manual sync blocked by config', [
+                    'integration_uid' => $integration->uid,
+                ]);
+                return false;
+            }
+
+            $logger->logInfo('Manual vector sync triggered', [
                 'integration_uid' => $integration->uid,
             ]);
+
+            self::dispatchForIntegration($integration);
+
+            return true;
+
+        } catch (\Throwable $e) {
+            $logger->logError('Manual dispatch failed: '.$e->getMessage(), [
+                'integration_uid' => $integration->uid ?? null,
+                'trace'           => $e->getTraceAsString(),
+            ]);
+
             return false;
         }
-
-        Log::info('Manual vector sync triggered', [
-            'integration_uid' => $integration->uid,
-        ]);
-
-        self::dispatchForIntegration($integration);
-
-        return true;
     }
 }
