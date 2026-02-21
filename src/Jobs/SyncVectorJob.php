@@ -41,7 +41,7 @@ class SyncVectorJob extends BaseJob
                     'read_timeout'    => 0,
                 ])
                 ->post(
-                    'https://api-jobs.iquesters.com/vector/create',
+                    'https://api-jobs.iquesters.com/vector/create/v1',
                     $payload
                 );
 
@@ -144,7 +144,6 @@ class SyncVectorJob extends BaseJob
     private function buildSystemsPayload(): array
     {
         try {
-            // allow single payload or systems array
             $items = $this->integrationPayload['systems']
                 ?? [$this->integrationPayload];
 
@@ -162,15 +161,15 @@ class SyncVectorJob extends BaseJob
                     );
                 }
 
-                if (empty($item['integration_uid'])) {
+                if (empty($item['integration_uuid'])) {
                     throw new \InvalidArgumentException(
-                        "Missing integration_uid at index {$index}"
+                        "Missing integration_uuid at index {$index}"
                     );
                 }
 
                 $systems[] = [
                     'system'           => $item['integration_provider'],
-                    'integration_uid' => $item['integration_uid'],
+                    'integration_uuid' => $item['integration_uuid'], // @todo for now it is uuid but it should be uid
                     'recreate_flag'    => (bool) ($item['recreate_flag'] ?? false),
                 ];
             }
@@ -182,10 +181,8 @@ class SyncVectorJob extends BaseJob
             return $systems;
 
         } catch (\Throwable $e) {
-
             $this->logError('Failed to build systems payload: '.$e->getMessage());
             $this->logDebug('Payload received', $this->integrationPayload);
-
             throw $e;
         }
     }

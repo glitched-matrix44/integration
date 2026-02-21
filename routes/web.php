@@ -22,6 +22,7 @@ Route::middleware(['web','auth'])->group(function () {
                 Route::delete('/{integrationUid}', [IntegrationController::class, 'destroy'])->name('destroy');
                 Route::get('/{integrationUid}', [IntegrationController::class, 'show'])->name('show');
                 
+                Route::get('/{integrationUid}/knob', [IntegrationConfigController::class, 'knob'])->name('knob');
                 Route::get('/{integrationUid}/configure', [IntegrationConfigController::class, 'configure'])->name('configure');
                 Route::post('/save-configuration', [IntegrationConfigController::class, 'store'])->name('configure.store');
                 

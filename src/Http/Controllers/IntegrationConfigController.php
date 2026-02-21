@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Log;
 use Iquesters\Integration\Constants\Constants;
 use Iquesters\Integration\Jobs\SyncVectorJob;
 use Iquesters\Integration\Models\IntegrationMeta;
+use Iquesters\Dev\Models\Knob;
 
 class IntegrationConfigController extends Controller
 {
@@ -105,11 +106,10 @@ class IntegrationConfigController extends Controller
             
             $payload = [
                 'integration_id' => $integration->id,
-
                 'systems' => [
                     [
                         'integration_provider' => $provider->name,
-                        'integration_uid'      => $integration->uid,
+                        'integration_uuid'     => $integration->uid,
                         'recreate_flag'        => false,
                     ]
                 ],
@@ -126,6 +126,86 @@ class IntegrationConfigController extends Controller
                 'success' => false,
                 'message' => 'Unable to save integration configuration.',
             ], 500);
+        }
+    }
+
+    public function knob($integrationUid)
+    {
+        try {
+            $integration = Integration::where('uid', $integrationUid)
+                ->with(['metas','supportedIntegration'])
+                ->firstOrFail();
+
+            $provider = $integration->supportedIntegration;
+
+            Log::debug('Integration Knob', [
+                'integration_uid' => $integrationUid,
+                'provider' => $provider->name
+            ]);
+
+            $metaMap = [
+                'woocommerce'      => 'gc_vec_knob',
+                'gautams-chatbot'  => 'gc_chatbot_knob',
+            ];
+
+            $knobUid = null;
+
+            // try to get knob from meta if mapping exists
+            if (isset($metaMap[$provider->name])) {
+                $metaValue = $integration->getMeta($metaMap[$provider->name]);
+                $knobUid = is_array($metaValue) ? ($metaValue[0] ?? null) : $metaValue;
+            }
+
+            /*
+            |--------------------------------------------------------------------------
+            | FALLBACK: no knob in meta
+            |--------------------------------------------------------------------------
+            | We fetch latest knob belonging to this provider.
+            | Assumes knob UID starts with provider prefix OR you store provider
+            | in knob YAML or status. Adjust if needed.
+            */
+
+            if (!$knobUid) {
+
+                Log::warning('Knob missing in meta, using fallback', [
+                    'integration_uid' => $integrationUid,
+                    'provider' => $provider->name
+                ]);
+
+                // simplest fallback → latest knob overall
+                $latestKnob = Knob::orderByDesc('version')->first();
+
+            } else {
+
+                $latestKnob = Knob::where('uid', $knobUid)
+                    ->orderByDesc('version')
+                    ->first();
+            }
+
+            if (!$latestKnob) {
+                return view('integration::integrations.knob', [
+                    'integration' => $integration,
+                    'knob' => null,
+                    'totalVersions' => 0,
+                ]);
+            }
+
+            $totalVersions = Knob::where('uid', $latestKnob->uid)->count();
+
+            return view('integration::integrations.knob', [
+                'integration' => $integration,
+                'knob' => $latestKnob,
+                'totalVersions' => $totalVersions,
+            ]);
+
+        } catch (\Throwable $th) {
+            Log::error('Integration knob Error', [
+                'integration_uid' => $integrationUid,
+                'error' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+
+            return redirect()->back()->with('error', $th->getMessage());
         }
     }
 
