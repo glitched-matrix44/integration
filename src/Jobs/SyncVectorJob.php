@@ -130,6 +130,7 @@ class SyncVectorJob extends BaseJob
 
             return [
                 'systems' => $systems,
+                'force_cleanup' => (bool) ($this->integrationPayload['force_cleanup'] ?? false),
             ];
 
         } catch (\Throwable $e) {
