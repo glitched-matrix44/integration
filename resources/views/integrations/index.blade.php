@@ -42,9 +42,7 @@
                         </td>
 
                         <td>
-                            <span class="badge badge-{{ strtolower($integration->status) }}">
-                                {{ ucfirst($integration->status) }}
-                            </span>
+                            <x-userinterface::status :status="$integration->status" />
                         </td>
 
                         <td>

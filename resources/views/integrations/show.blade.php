@@ -51,9 +51,7 @@
                 {{ $integration->name }}
                 {!! $integration->supportedInt?->getMeta('icon') !!}
             </h5>
-            <span class="badge badge-{{ strtolower($integration->status) }}">
-                {{ ucfirst($integration->status) }}
-            </span>
+            <x-userinterface::status :status="$integration->status" />
         </div>
 
         <div class="d-flex align-items-center justify-content-center gap-2">

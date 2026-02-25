@@ -8,9 +8,7 @@
         {{ $integration->name }}
         {!! $integration->supportedInt?->getMeta('icon') !!}
     </h5>
-    <span class="badge badge-{{ strtolower($integration->status) }} ms-2">
-        {{ ucfirst($integration->status) }}
-    </span>
+    <x-userinterface::status :status="$integration->status" />
     <span class="badge bg-secondary ms-2">
         Versions: {{ $totalVersions }}
     </span>

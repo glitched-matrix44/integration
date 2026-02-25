@@ -97,9 +97,13 @@
                                         <div class="mt-1 d-flex justify-content-start gap-2 align-items-center">
                                             <span class="text-muted">Scopes:</span>
                                             @if($integrationStatus['scopes_configured'])
-                                                <span class="badge bg-success">Configured</span>
+                                                <x-userinterface::status status="active">
+                                                    Configured
+                                                </x-userinterface::status>
                                             @else
-                                                <span class="badge badge-half-done">Not Configured</span>
+                                                <x-userinterface::status status="half-done">
+                                                    Not Configured
+                                                </x-userinterface::status>
                                             @endif
                                         </div>
                                     </div>
