@@ -7,12 +7,9 @@ use Iquesters\Foundation\Jobs\BaseJob;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
-use Iquesters\Foundation\System\Traits\Loggable;
 
 class SyncVectorJob extends BaseJob
 {
-    use Loggable;
-
     protected array $integrationPayload;
     protected ?\Carbon\Carbon $startedAt = null;
 
@@ -29,11 +26,15 @@ class SyncVectorJob extends BaseJob
     {
         try {
             $this->startedAt = now();
-            $this->logMethodStart('Vector sync job started');
+            $this->logMethodStart($this->ctx([
+                'integration_id' => $this->integrationPayload['integration_id'] ?? null,
+            ]));
 
             $payload = $this->buildProviderPayload();
 
-            $this->logDebug('Vector request payload: ' . json_encode($payload));
+            $this->logDebug('Vector request payload' . $this->ctx([
+                'payload' => $payload,
+            ]));
 
             $response = Http::timeout(0)
                 ->withOptions([
@@ -46,8 +47,10 @@ class SyncVectorJob extends BaseJob
                 );
 
             $this->logInfo(
-                'Vector API response received | status=' . $response->status() .
-                ' | body=' . $response->body()
+                'Vector API response received' . $this->ctx([
+                    'status' => $response->status(),
+                    'body' => $response->body(),
+                ])
             );
 
             if (! $response->successful()) {
@@ -55,8 +58,10 @@ class SyncVectorJob extends BaseJob
                 $body   = $response->body();
 
                 $this->logError(
-                    'Vector API call failed | status=' . $status .
-                    ' | body=' . $body
+                    'Vector API call failed' . $this->ctx([
+                        'status' => $status,
+                        'body' => $body,
+                    ])
                 );
 
                 return;
@@ -64,12 +69,15 @@ class SyncVectorJob extends BaseJob
 
             $this->setResponse($response->json());
 
-            $this->logMethodEnd('Vector sync completed successfully');
+            $this->logMethodEnd($this->ctx([
+                'integration_id' => $this->integrationPayload['integration_id'] ?? null,
+            ]));
 
         } catch (\Throwable $e) {
-            $this->logError('Vector sync failed: '.$e->getMessage(), [
-                'trace' => $e->getTraceAsString()
-            ]);
+            $this->logError('Vector sync failed' . $this->ctx([
+                'integration_id' => $this->integrationPayload['integration_id'] ?? null,
+                'error' => $e->getMessage(),
+            ]));
             throw $e;
         }
     }
@@ -112,7 +120,10 @@ class SyncVectorJob extends BaseJob
             ]);
 
         } catch (\Throwable $e) {
-            $this->logWarning('Vector response insert failed: '.$e->getMessage());
+            $this->logWarning('Vector response insert failed' . $this->ctx([
+                'integration_id' => $this->integrationPayload['integration_id'] ?? null,
+                'error' => $e->getMessage(),
+            ]));
         }
     }
 
@@ -134,7 +145,10 @@ class SyncVectorJob extends BaseJob
             ];
 
         } catch (\Throwable $e) {
-            $this->logError('Failed to build vector payload: '.$e->getMessage());
+            $this->logError('Failed to build vector payload' . $this->ctx([
+                'integration_id' => $this->integrationPayload['integration_id'] ?? null,
+                'error' => $e->getMessage(),
+            ]));
             throw $e;
         }
     }
@@ -182,8 +196,13 @@ class SyncVectorJob extends BaseJob
             return $systems;
 
         } catch (\Throwable $e) {
-            $this->logError('Failed to build systems payload: '.$e->getMessage());
-            $this->logDebug('Payload received', $this->integrationPayload);
+            $this->logError('Failed to build systems payload' . $this->ctx([
+                'integration_id' => $this->integrationPayload['integration_id'] ?? null,
+                'error' => $e->getMessage(),
+            ]));
+            $this->logDebug('Payload received' . $this->ctx([
+                'payload' => $this->integrationPayload,
+            ]));
             throw $e;
         }
     }
