@@ -4,12 +4,12 @@ namespace Iquesters\Integration\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Facades\Http;
 use Iquesters\Integration\Models\Integration;
 use Illuminate\Support\Facades\Log;
 use Iquesters\Integration\Constants\Constants;
 use Iquesters\Integration\Jobs\SyncVectorJob;
 use Iquesters\Integration\Models\IntegrationMeta;
-use Iquesters\Dev\Models\Knob;
 
 class IntegrationConfigController extends Controller
 {
@@ -133,7 +133,7 @@ class IntegrationConfigController extends Controller
     {
         try {
             $integration = Integration::where('uid', $integrationUid)
-                ->with(['metas','supportedIntegration'])
+                ->with(['metas', 'supportedIntegration'])
                 ->firstOrFail();
 
             $provider = $integration->supportedIntegration;
@@ -143,61 +143,36 @@ class IntegrationConfigController extends Controller
                 'provider' => $provider->name
             ]);
 
-            $metaMap = [
-                'woocommerce'      => 'gc_vec_knob',
-                'gautams-chatbot'  => 'gc_chatbot_knob',
-            ];
+            $knobTypes = ['gc_vec_knob', 'gc_chatbot_knob'];
+            $defaultKnobType = $knobTypes[0];
+            $knobStatus = 'unknown';
 
-            $knobUid = null;
+            try {
+                $response = Http::acceptJson()
+                    ->timeout(20)
+                    ->get("https://api-util.iquesters.com/v1/knobs/{$integrationUid}");
 
-            // try to get knob from meta if mapping exists
-            if (isset($metaMap[$provider->name])) {
-                $metaValue = $integration->getMeta($metaMap[$provider->name]);
-                $knobUid = is_array($metaValue) ? ($metaValue[0] ?? null) : $metaValue;
-            }
-
-            /*
-            |--------------------------------------------------------------------------
-            | FALLBACK: no knob in meta
-            |--------------------------------------------------------------------------
-            | We fetch latest knob belonging to this provider.
-            | Assumes knob UID starts with provider prefix OR you store provider
-            | in knob YAML or status. Adjust if needed.
-            */
-
-            if (!$knobUid) {
-
-                Log::warning('Knob missing in meta, using fallback', [
+                if ($response->successful()) {
+                    $rows = $response->json();
+                    if (is_array($rows) && !empty($rows)) {
+                        $selectedKnob = collect($rows)->firstWhere('knob_type', $defaultKnobType) ?? $rows[0];
+                        $knobStatus = $selectedKnob['status'] ?? 'unknown';
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('Unable to prefetch knob status', [
                     'integration_uid' => $integrationUid,
-                    'provider' => $provider->name
-                ]);
-
-                // simplest fallback → latest knob overall
-                $latestKnob = Knob::orderByDesc('version')->first();
-
-            } else {
-
-                $latestKnob = Knob::where('uid', $knobUid)
-                    ->orderByDesc('version')
-                    ->first();
-            }
-
-            if (!$latestKnob) {
-                return view('integration::integrations.knob', [
-                    'integration' => $integration,
-                    'knob' => null,
-                    'totalVersions' => 0,
+                    'error' => $e->getMessage(),
                 ]);
             }
-
-            $totalVersions = Knob::where('uid', $latestKnob->uid)->count();
 
             return view('integration::integrations.knob', [
                 'integration' => $integration,
-                'knob' => $latestKnob,
-                'totalVersions' => $totalVersions,
+                'integrationUid' => $integrationUid,
+                'knobTypes' => $knobTypes,
+                'defaultKnobType' => $defaultKnobType,
+                'knobStatus' => $knobStatus,
             ]);
-
         } catch (\Throwable $th) {
             Log::error('Integration knob Error', [
                 'integration_uid' => $integrationUid,
@@ -209,6 +184,43 @@ class IntegrationConfigController extends Controller
         }
     }
 
+    public function knobData(Request $request, $integrationUid)
+    {
+        try {
+            $url = "https://api-util.iquesters.com/v1/knobs/{$integrationUid}";
+            $knobType = $request->query('knob_type');
+
+            if (!empty($knobType)) {
+                $url .= '/' . urlencode($knobType);
+            }
+
+            $response = Http::acceptJson()->timeout(20)->get($url);
+
+            if (!$response->successful()) {
+                Log::warning('Knob API request failed', [
+                    'integration_uid' => $integrationUid,
+                    'status' => $response->status(),
+                    'url' => $url,
+                ]);
+
+                return response()->json([
+                    'message' => 'Unable to fetch knob data from upstream service.',
+                ], 502);
+            }
+
+            return response()->json($response->json());
+        } catch (\Throwable $th) {
+            Log::error('Knob data proxy error', [
+                'integration_uid' => $integrationUid,
+                'error' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to fetch knob data.',
+            ], 500);
+        }
+    }
 
     protected function saveIntegrationMeta(
         int $integrationId,

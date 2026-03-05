@@ -33,6 +33,15 @@
             // 'permission' => 'view-teams'
         ],
         [
+            'route' => 'integration.knob',
+            'params' => [
+                'integrationUid' => $integration->uid,
+            ],
+            'icon' => 'fas fa-fw fa-sliders',
+            'label' => 'Knob',
+            // 'permission' => 'view-teams'
+        ],
+        [
             'route' => 'integration.syncdata',
             'params' => [
                 'integrationUid' => $integration->uid,
