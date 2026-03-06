@@ -144,27 +144,12 @@ class IntegrationConfigController extends Controller
             ]);
 
             $knobTypes = ['gc_vec_knob', 'gc_chatbot_knob'];
-            $defaultKnobType = $knobTypes[0];
+            $defaultKnobType = match ($provider->name) {
+                Constants::WOOCOMMERCE => 'gc_vec_knob',
+                Constants::GAUTAMS_CHATBOT => 'gc_chatbot_knob',
+                default => $knobTypes[0],
+            };
             $knobStatus = 'unknown';
-
-            try {
-                $response = Http::acceptJson()
-                    ->timeout(20)
-                    ->get("https://api-util.iquesters.com/v1/knobs/{$integrationUid}");
-
-                if ($response->successful()) {
-                    $rows = $response->json();
-                    if (is_array($rows) && !empty($rows)) {
-                        $selectedKnob = collect($rows)->firstWhere('knob_type', $defaultKnobType) ?? $rows[0];
-                        $knobStatus = $selectedKnob['status'] ?? 'unknown';
-                    }
-                }
-            } catch (\Throwable $e) {
-                Log::warning('Unable to prefetch knob status', [
-                    'integration_uid' => $integrationUid,
-                    'error' => $e->getMessage(),
-                ]);
-            }
 
             return view('integration::integrations.knob', [
                 'integration' => $integration,
@@ -187,25 +172,29 @@ class IntegrationConfigController extends Controller
     public function knobData(Request $request, $integrationUid)
     {
         try {
-            $url = "https://api-util.iquesters.com/v1/knobs/{$integrationUid}";
             $knobType = $request->query('knob_type');
+            $url = "https://api-util.iquesters.com/v1/knobs/{$integrationUid}";
 
             if (!empty($knobType)) {
-                $url .= '/' . urlencode($knobType);
+                $url .= '/' . urlencode($knobType) . '/all';
             }
 
             $response = Http::acceptJson()->timeout(20)->get($url);
 
             if (!$response->successful()) {
+                $payload = $response->json();
+
                 Log::warning('Knob API request failed', [
                     'integration_uid' => $integrationUid,
                     'status' => $response->status(),
                     'url' => $url,
+                    'response' => $payload,
                 ]);
 
-                return response()->json([
-                    'message' => 'Unable to fetch knob data from upstream service.',
-                ], 502);
+                return response()->json(
+                    is_array($payload) ? $payload : ['message' => 'Unable to fetch knob data from upstream service.'],
+                    $response->status()
+                );
             }
 
             return response()->json($response->json());

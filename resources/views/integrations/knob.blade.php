@@ -221,16 +221,9 @@ const KnobEditor = (() => {
     let textareaInited = false;
     let lastFormYaml = null;
     let initialYamlObject = null;
+    let hasKnobData = true;
     const newFieldPaths = new Set();
     const updatedFieldPaths = new Set();
-
-    const dummyVersions = [
-        { version: 5, status: 'active', updated_at: '2026-03-01 11:30:00' },
-        { version: 4, status: 'inactive', updated_at: '2026-02-27 16:05:00' },
-        { version: 3, status: 'inactive', updated_at: '2026-02-25 09:20:00' },
-        { version: 2, status: 'inactive', updated_at: '2026-02-22 18:45:00' },
-        { version: 1, status: 'inactive', updated_at: '2026-02-18 05:20:35' }
-    ];
 
     const el = (id) => document.getElementById(id);
 
@@ -366,6 +359,40 @@ const KnobEditor = (() => {
         if (errorEl) errorEl.textContent = message;
     }
 
+    function renderCreatePrompt() {
+        const rendered = el('yamlRendered');
+        if (!rendered) return;
+
+        rendered.innerHTML = `
+            <div class="border rounded p-4 bg-body-tertiary text-center">
+                <div class="fw-semibold mb-2">No knob exists for this integration yet.</div>
+                <div class="text-muted small mb-3">Create a new knob and start editing it in UI View or YAML.</div>
+                <button type="button" class="btn btn-sm btn-primary" onclick="KnobEditor.startCreate()">
+                    Create Knob
+                </button>
+            </div>
+        `;
+    }
+
+    function syncToggleButtons() {
+        const editBtn = el('editBtn');
+        const viewBtn = el('viewBtn');
+
+        if (!hasKnobData) {
+            editBtn?.classList.add('d-none');
+            viewBtn?.classList.add('d-none');
+            return;
+        }
+
+        if (isEditMode) {
+            editBtn?.classList.add('d-none');
+            viewBtn?.classList.remove('d-none');
+        } else {
+            editBtn?.classList.remove('d-none');
+            viewBtn?.classList.add('d-none');
+        }
+    }
+
     function setValid() {
         isYamlValid = true;
 
@@ -421,6 +448,11 @@ const KnobEditor = (() => {
 
     function validateYaml(text) {
         try {
+            if (!text.trim()) {
+                setValid();
+                return true;
+            }
+
             jsyaml.load(text);
             setValid();
             return true;
@@ -433,6 +465,12 @@ const KnobEditor = (() => {
     function renderYamlHighlight(text) {
         const pre = el('yamlHighlighted');
         if (!pre) return;
+
+        if (!text.trim()) {
+            pre.innerHTML = '';
+            return;
+        }
+
         const linePaths = extractLinePathsFromYaml(text);
 
         pre.innerHTML = text
@@ -747,7 +785,7 @@ const KnobEditor = (() => {
 
         if (valid) {
             try {
-                const parsed = jsyaml.load(text);
+                const parsed = text.trim() ? (jsyaml.load(text) || {}) : {};
                 recomputeMarkersFromCurrent(parsed);
                 renderYamlHighlight(text);
                 renderUiView(parsed);
@@ -855,7 +893,7 @@ const KnobEditor = (() => {
         renderYamlHighlight(yamlText);
 
         try {
-            const parsed = jsyaml.load(yamlText);
+            const parsed = yamlText.trim() ? jsyaml.load(yamlText) : {};
             initialYamlObject = deepClone(parsed || {});
             renderUiView(parsed);
         } catch (_) {
@@ -865,18 +903,59 @@ const KnobEditor = (() => {
         }
     }
 
+    function seedEmptyKnob() {
+        const emptyYaml = '';
+        hasKnobData = false;
+        el('knobLoading')?.classList.add('d-none');
+        el('knobError')?.classList.add('d-none');
+        updateBadges('draft', '--');
+        setYamlContent(emptyYaml);
+        renderCreatePrompt();
+        syncToggleButtons();
+    }
+
+    function sortKnobVersions(rows) {
+        return [...rows].sort((a, b) => Number(b?.version ?? 0) - Number(a?.version ?? 0));
+    }
+
+    function getActiveKnob(rows) {
+        return rows.find((item) => String(item?.status ?? '').toLowerCase() === 'active') || rows[0];
+    }
+
     async function loadKnob() {
         el('knobLoading')?.classList.remove('d-none');
         el('knobError')?.classList.add('d-none');
 
         try {
-            const response = await fetch(knobDataUrl, {
+            const params = new URLSearchParams({
+                knob_type: el('knobTypeSelect')?.value || defaultKnobType
+            });
+
+            const response = await fetch(`${knobDataUrl}?${params.toString()}`, {
                 method: 'GET',
                 headers: { Accept: 'application/json' }
             });
 
             if (!response.ok) {
-                throw new Error(`API request failed with status ${response.status}`);
+                let errorMessage = `API request failed with status ${response.status}`;
+                let errorPayload = null;
+
+                try {
+                    errorPayload = await response.json();
+                    if (typeof errorPayload?.message === 'string' && errorPayload.message.trim() !== '') {
+                        errorMessage = errorPayload.message;
+                    } else if (typeof errorPayload?.detail === 'string' && errorPayload.detail.trim() !== '') {
+                        errorMessage = errorPayload.detail;
+                    }
+                } catch (_) {
+                }
+
+                if (response.status === 404 && errorPayload?.detail === 'knob_not_found') {
+                    seedEmptyKnob();
+                    return;
+                }
+
+                throw new Error(errorMessage);
             }
 
             const rows = await response.json();
@@ -884,23 +963,26 @@ const KnobEditor = (() => {
                 throw new Error('No knob data returned from API.');
             }
 
-            const selectedType = el('knobTypeSelect')?.value || defaultKnobType;
-            const selectedKnob = rows.find((item) => item.knob_type === selectedType) || rows[0];
+            const sortedRows = sortKnobVersions(rows);
+            const selectedKnob = getActiveKnob(sortedRows);
             const yamlText = selectedKnob?.knob || '';
+            hasKnobData = true;
 
             el('knobLoading')?.classList.add('d-none');
             updateBadges(selectedKnob?.status || 'unknown', selectedKnob?.version);
             setYamlContent(yamlText);
+            renderVersionModal(sortedRows);
+            syncToggleButtons();
         } catch (error) {
             setError(error.message || 'Failed to load knob data.');
         }
     }
 
-    function renderDummyModal() {
+    function renderVersionModal(rows) {
         const versionCards = el('versionCards');
         if (!versionCards) return;
 
-        versionCards.innerHTML = dummyVersions.map((item) => `
+        versionCards.innerHTML = rows.map((item) => `
             <div class="border rounded p-3 bg-body">
                 <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
                     <div class="d-flex align-items-center gap-2">
@@ -921,17 +1003,24 @@ const KnobEditor = (() => {
     }
 
     function enableEdit() {
+        if (!hasKnobData) return;
+
         isEditMode = true;
         el('uiViewMode')?.classList.add('d-none');
         el('uiEditMode')?.classList.remove('d-none');
         el('yamlViewMode')?.classList.add('d-none');
         el('yamlEditMode')?.classList.remove('d-none');
         el('saveBtn')?.classList.remove('d-none');
-        el('editBtn')?.classList.add('d-none');
-        el('viewBtn')?.classList.remove('d-none');
+        syncToggleButtons();
 
         initTextarea();
         onTextareaChange();
+    }
+
+    function startCreate() {
+        seedEmptyKnob();
+        hasKnobData = true;
+        enableEdit();
     }
 
     function disableEdit() {
@@ -941,15 +1030,13 @@ const KnobEditor = (() => {
         el('yamlViewMode')?.classList.remove('d-none');
         el('yamlEditMode')?.classList.add('d-none');
         el('saveBtn')?.classList.add('d-none');
-        el('editBtn')?.classList.remove('d-none');
-        el('viewBtn')?.classList.add('d-none');
+        syncToggleButtons();
         el('invalidBadge')?.classList.add('d-none');
         el('footerError')?.classList.add('d-none');
         el('yamlEditor')?.classList.remove('is-valid', 'is-invalid');
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        renderDummyModal();
         loadKnob();
 
         el('knobForm')?.addEventListener('submit', (e) => {
@@ -960,7 +1047,7 @@ const KnobEditor = (() => {
         });
     });
 
-    return { enableEdit, disableEdit, updateFromUi, addFieldToSection };
+    return { enableEdit, disableEdit, updateFromUi, addFieldToSection, startCreate };
 })();
 </script>
 @endsection
