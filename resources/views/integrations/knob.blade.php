@@ -213,6 +213,8 @@
 const KnobEditor = (() => {
     const integrationUid = @json($integrationUid);
     const knobDataUrl = @json(route('integration.knob.data', ['integrationUid' => $integrationUid]));
+    const knobSaveUrl = @json(route('integration.knob.save', ['integrationUid' => $integrationUid]));
+    const knobActivateUrl = @json(route('integration.knob.activate', ['integrationUid' => $integrationUid]));
     const defaultKnobType = @json($defaultKnobType);
 
     let isEditMode = false;
@@ -222,6 +224,9 @@ const KnobEditor = (() => {
     let lastFormYaml = null;
     let initialYamlObject = null;
     let hasKnobData = true;
+    let isCreatingKnob = false;
+    let activatingVersion = null;
+    let isSaving = false;
     const newFieldPaths = new Set();
     const updatedFieldPaths = new Set();
 
@@ -359,6 +364,12 @@ const KnobEditor = (() => {
         if (errorEl) errorEl.textContent = message;
     }
 
+    function clearError() {
+        const errorEl = el('knobError');
+        errorEl?.classList.add('d-none');
+        if (errorEl) errorEl.textContent = '';
+    }
+
     function renderCreatePrompt() {
         const rendered = el('yamlRendered');
         if (!rendered) return;
@@ -407,6 +418,7 @@ const KnobEditor = (() => {
 
         const btn = el('saveBtn');
         if (btn) btn.disabled = false;
+        syncSaveButton();
     }
 
     function setInvalid(e) {
@@ -906,6 +918,7 @@ const KnobEditor = (() => {
     function seedEmptyKnob() {
         const emptyYaml = '';
         hasKnobData = false;
+        isCreatingKnob = false;
         el('knobLoading')?.classList.add('d-none');
         el('knobError')?.classList.add('d-none');
         updateBadges('draft', '--');
@@ -967,6 +980,7 @@ const KnobEditor = (() => {
             const selectedKnob = getActiveKnob(sortedRows);
             const yamlText = selectedKnob?.knob || '';
             hasKnobData = true;
+            isCreatingKnob = false;
 
             el('knobLoading')?.classList.add('d-none');
             updateBadges(selectedKnob?.status || 'unknown', selectedKnob?.version);
@@ -991,7 +1005,12 @@ const KnobEditor = (() => {
                     </div>
                     <div>
                         ${item.status === 'inactive'
-                            ? '<button type="button" class="btn btn-sm btn-outline-success">Make Active</button>'
+                            ? `<button
+                                    type="button"
+                                    class="btn btn-sm btn-outline-success"
+                                    onclick="KnobEditor.activateVersion(${Number(item.version)})"
+                                    ${activatingVersion === Number(item.version) ? 'disabled' : ''}
+                                >${activatingVersion === Number(item.version) ? 'Activating...' : 'Make Active'}</button>`
                             : '<button type="button" class="btn btn-sm btn-outline-secondary" disabled>Active</button>'}
                     </div>
                 </div>
@@ -1000,6 +1019,118 @@ const KnobEditor = (() => {
                 </div>
             </div>
         `).join('');
+    }
+
+    function syncSaveButton() {
+        const btn = el('saveBtn');
+        if (!btn) return;
+
+        btn.disabled = isSaving || !isYamlValid;
+        btn.textContent = isSaving
+            ? (isCreatingKnob ? 'Creating...' : 'Saving...')
+            : (isCreatingKnob ? 'Create Knob' : 'Save New Version');
+    }
+
+    async function activateVersion(version) {
+        activatingVersion = Number(version);
+
+        try {
+            const response = await fetch(knobActivateUrl, {
+                method: 'POST',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json',
+                    'X-CSRF-TOKEN': el('knobForm')?.querySelector('input[name=\"_token\"]')?.value || ''
+                },
+                body: JSON.stringify({
+                    knob_type: el('knobTypeSelect')?.value || defaultKnobType,
+                    version: Number(version)
+                })
+            });
+
+            if (!response.ok) {
+                let errorMessage = `Activation failed with status ${response.status}`;
+
+                try {
+                    const errorPayload = await response.json();
+                    if (typeof errorPayload?.message === 'string' && errorPayload.message.trim() !== '') {
+                        errorMessage = errorPayload.message;
+                    } else if (typeof errorPayload?.detail === 'string' && errorPayload.detail.trim() !== '') {
+                        errorMessage = errorPayload.detail;
+                    }
+                } catch (_) {
+                }
+
+                throw new Error(errorMessage);
+            }
+
+            await loadKnob();
+        } catch (error) {
+            setError(error.message || 'Failed to activate knob version.');
+        } finally {
+            activatingVersion = null;
+        }
+    }
+
+    async function submitKnobForm(event) {
+        event.preventDefault();
+
+        if (!isYamlValid) {
+            el('footerError')?.classList.remove('d-none');
+            return;
+        }
+
+        const yaml = el('yamlHidden')?.value ?? el('yamlEditor')?.value ?? '';
+        if (!yaml.trim()) {
+            setError('Knob YAML must not be empty.');
+            return;
+        }
+
+        isSaving = true;
+        clearError();
+        syncSaveButton();
+
+        try {
+            const params = new URLSearchParams({
+                knob_type: el('knobTypeSelect')?.value || defaultKnobType
+            });
+
+            const response = await fetch(`${knobSaveUrl}?${params.toString()}`, {
+                method: isCreatingKnob ? 'POST' : 'PUT',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'text/plain; charset=UTF-8',
+                    'X-CSRF-TOKEN': el('knobForm')?.querySelector('input[name="_token"]')?.value || ''
+                },
+                body: yaml
+            });
+
+            if (!response.ok) {
+                let errorMessage = `Save failed with status ${response.status}`;
+
+                try {
+                    const errorPayload = await response.json();
+                    if (typeof errorPayload?.message === 'string' && errorPayload.message.trim() !== '') {
+                        errorMessage = errorPayload.message;
+                    } else if (typeof errorPayload?.detail === 'string' && errorPayload.detail.trim() !== '') {
+                        errorMessage = errorPayload.detail;
+                    }
+                } catch (_) {
+                }
+
+                throw new Error(errorMessage);
+            }
+
+            hasKnobData = true;
+            isCreatingKnob = false;
+            await loadKnob();
+            disableEdit();
+        } catch (error) {
+            setError(error.message || 'Failed to save knob YAML.');
+        } finally {
+            isSaving = false;
+            syncSaveButton();
+        }
     }
 
     function enableEdit() {
@@ -1015,11 +1146,13 @@ const KnobEditor = (() => {
 
         initTextarea();
         onTextareaChange();
+        syncSaveButton();
     }
 
     function startCreate() {
         seedEmptyKnob();
         hasKnobData = true;
+        isCreatingKnob = true;
         enableEdit();
     }
 
@@ -1040,14 +1173,11 @@ const KnobEditor = (() => {
         loadKnob();
 
         el('knobForm')?.addEventListener('submit', (e) => {
-            if (!isYamlValid) {
-                e.preventDefault();
-                el('footerError')?.classList.remove('d-none');
-            }
+            submitKnobForm(e);
         });
     });
 
-    return { enableEdit, disableEdit, updateFromUi, addFieldToSection, startCreate };
+    return { enableEdit, disableEdit, updateFromUi, addFieldToSection, startCreate, activateVersion };
 })();
 </script>
 @endsection

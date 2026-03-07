@@ -211,6 +211,133 @@ class IntegrationConfigController extends Controller
         }
     }
 
+    public function knobActivate(Request $request, $integrationUid)
+    {
+        try {
+            $request->validate([
+                'knob_type' => 'required|string',
+                'version' => 'required',
+            ]);
+
+            $knobType = $request->input('knob_type');
+            $version = $request->input('version');
+            $url = "https://api-util.iquesters.com/v1/knobs/{$integrationUid}/" . urlencode($knobType) . '/' . urlencode((string) $version) . '/activate';
+
+            $response = Http::acceptJson()->post($url);
+
+            if (!$response->successful()) {
+                $payload = $response->json();
+
+                Log::warning('Knob activate API request failed', [
+                    'integration_uid' => $integrationUid,
+                    'knob_type' => $knobType,
+                    'version' => $version,
+                    'status' => $response->status(),
+                    'url' => $url,
+                    'response' => $payload,
+                ]);
+
+                return response()->json(
+                    is_array($payload) ? $payload : ['message' => 'Unable to activate knob version.'],
+                    $response->status()
+                );
+            }
+
+            return response()->json($response->json());
+        } catch (\Throwable $th) {
+            Log::error('Knob activate proxy error', [
+                'integration_uid' => $integrationUid,
+                'error' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to activate knob version.',
+            ], 500);
+        }
+    }
+
+    public function knobSave(Request $request, $integrationUid)
+    {
+        try {
+            $knobType = (string) $request->query('knob_type', $request->input('knob_type', ''));
+            $yaml = (string) $request->getContent();
+
+            Log::debug('Knob Save Request', [
+                'integration_uid' => $integrationUid,
+                'knob_type' => $knobType,
+                'payload_length' => strlen($yaml),
+                'yaml_payload' => $yaml
+            ]);
+            
+            if ($knobType === '') {
+                return response()->json([
+                    'message' => 'Knob type is required.',
+                ], 422);
+            }
+
+            if (trim($yaml) === '') {
+                return response()->json([
+                    'message' => 'Knob YAML must not be empty.',
+                ], 422);
+            }
+
+            if (function_exists('mb_check_encoding') && !mb_check_encoding($yaml, 'UTF-8')) {
+                return response()->json([
+                    'message' => 'Knob YAML must be UTF-8 encoded.',
+                ], 422);
+            }
+
+            if (class_exists(\Symfony\Component\Yaml\Yaml::class)) {
+                try {
+                    \Symfony\Component\Yaml\Yaml::parse($yaml);
+                } catch (\Throwable $e) {
+                    return response()->json([
+                        'message' => 'Knob YAML is invalid.',
+                        'detail' => $e->getMessage(),
+                    ], 422);
+                }
+            }
+
+            $url = "https://api-util.iquesters.com/v1/knobs/{$integrationUid}/" . urlencode($knobType);
+            $method = strtolower($request->method()) === 'put' ? 'put' : 'post';
+
+            $response = Http::withBody($yaml, 'text/plain')
+                ->acceptJson()
+                ->send(strtoupper($method), $url);
+
+            if (!$response->successful()) {
+                $payload = $response->json();
+
+                Log::warning('Knob save API request failed', [
+                    'integration_uid' => $integrationUid,
+                    'knob_type' => $knobType,
+                    'method' => strtoupper($method),
+                    'status' => $response->status(),
+                    'url' => $url,
+                    'response' => $payload,
+                ]);
+
+                return response()->json(
+                    is_array($payload) ? $payload : ['message' => 'Unable to save knob YAML.'],
+                    $response->status()
+                );
+            }
+
+            return response()->json($response->json());
+        } catch (\Throwable $th) {
+            Log::error('Knob save proxy error', [
+                'integration_uid' => $integrationUid,
+                'error' => $th->getMessage(),
+                'trace' => $th->getTraceAsString(),
+            ]);
+
+            return response()->json([
+                'message' => 'Failed to save knob YAML.',
+            ], 500);
+        }
+    }
+
     protected function saveIntegrationMeta(
         int $integrationId,
         string $key,
