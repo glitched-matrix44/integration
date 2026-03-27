@@ -100,7 +100,8 @@ class IntegrationModuleSeeder
 
             $this->displayFileStats($fileStats);
 
-            $this->processMetaSubdirectories($integrationDir, $integrationName);
+            $primaryIntegrationName = $data[0]['name'] ?? $integrationName;
+            $this->processMetaSubdirectories($integrationDir, $primaryIntegrationName);
 
             $this->command->newLine();
         }
