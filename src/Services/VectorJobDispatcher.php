@@ -36,36 +36,40 @@ class VectorJobDispatcher
             ];
 
             if (! in_array($provider->name, $supportedProviders, true)) {
-                $logger->logInfo('Vector sync skipped: unsupported provider', [
+                $logger->logInfo('Vector sync skipped: unsupported provider' . self::ctx([
                     'integration_uid' => $integration->uid,
-                    'provider'        => $provider->name,
-                ]);
+                    'provider' => $provider->name,
+                ]));
                 return;
             }
 
             $payload = [
-                'integration_id'       => $integration->id,
-                'integration_uid'      => $integration->uid,
-                'url'                  => $integration->getMeta('website_url'),
-                'consumer_key'         => $integration->getMeta('consumer_key'),
-                'consumer_secret'      => $integration->getMeta('consumer_secret'),
-                'integration_provider' => $provider->name,
+                'integration_id' => $integration->id,
+                'systems' => [
+                    [
+                        'integration_provider' => $provider->name,
+                        'integration_uuid' => $integration->uid,
+                        'recreate_flag' => true,
+                    ],
+                ],
+                'force_cleanup' => true,
             ];
 
-            $logger->logInfo('Dispatching vector sync job', [
+            $logger->logInfo('Dispatching vector sync job' . self::ctx([
                 'integration_uid' => $integration->uid,
-                'provider'        => $provider->name,
-            ]);
+                'provider' => $provider->name,
+            ]));
 
-            $logger->logDebug('Dispatch payload', $payload);
+            $logger->logDebug('Dispatch payload' . self::ctx([
+                'payload' => $payload,
+            ]));
 
             SyncVectorJob::dispatch($payload);
 
         } catch (\Throwable $e) {
-            $logger->logError('Failed to dispatch vector job: '.$e->getMessage(), [
+            $logger->logError('Failed to dispatch vector job: ' . $e->getMessage() . self::ctx([
                 'integration_uid' => $integration->uid ?? null,
-                'trace'           => $e->getTraceAsString(),
-            ]);
+            ]));
         }
     }
 
@@ -96,9 +100,9 @@ class VectorJobDispatcher
                     foreach ($integrations as $integration) {
 
                         if ($integration->getMeta('vector_sync_enabled') === '0') {
-                            $logger->logInfo('Vector sync disabled for integration', [
+                            $logger->logInfo('Vector sync disabled for integration' . self::ctx([
                                 'integration_uid' => $integration->uid,
-                            ]);
+                            ]));
                             continue;
                         }
 
@@ -109,9 +113,7 @@ class VectorJobDispatcher
             $logger->logMethodEnd('Scheduled vector dispatch completed');
 
         } catch (\Throwable $e) {
-            $logger->logError('Scheduled dispatch failed: '.$e->getMessage(), [
-                'trace' => $e->getTraceAsString(),
-            ]);
+            $logger->logError('Scheduled dispatch failed: ' . $e->getMessage());
         }
     }
 
@@ -126,27 +128,31 @@ class VectorJobDispatcher
             $conf = ConfProvider::from(Module::INTEGRATION);
 
             if (! $conf->vector_sync_manual_allowed) {
-                $logger->logWarning('Manual sync blocked by config', [
+                $logger->logWarning('Manual sync blocked by config' . self::ctx([
                     'integration_uid' => $integration->uid,
-                ]);
+                ]));
                 return false;
             }
 
-            $logger->logInfo('Manual vector sync triggered', [
+            $logger->logInfo('Manual vector sync triggered' . self::ctx([
                 'integration_uid' => $integration->uid,
-            ]);
+            ]));
 
             self::dispatchForIntegration($integration);
 
             return true;
 
         } catch (\Throwable $e) {
-            $logger->logError('Manual dispatch failed: '.$e->getMessage(), [
+            $logger->logError('Manual dispatch failed: ' . $e->getMessage() . self::ctx([
                 'integration_uid' => $integration->uid ?? null,
-                'trace'           => $e->getTraceAsString(),
-            ]);
+            ]));
 
             return false;
         }
+    }
+
+    private static function ctx(array $context): string
+    {
+        return ' | context=' . json_encode($context, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     }
 }
