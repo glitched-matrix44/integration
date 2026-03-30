@@ -2,12 +2,11 @@
 
 return [
     [
-        'name' => 'RAI Product Finder',
-        'small_name' => 'RPF',
+        'name' => 'RAI Video Creator',
+        'small_name' => 'RVC',
         'nature' => 'AI Agent',
         'category' => 'ai-solutions',
         'status' => 'draft',
     ],
 ];
-
 

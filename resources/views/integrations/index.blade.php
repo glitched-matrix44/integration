@@ -64,12 +64,12 @@
 
                         <td>
                             <div class="d-flex align-items-center justify-content-center gap-2">
-                                @if ($integration->status !== 'deleted')   
+                                @if ($integration->status !== 'deleted')
                                     <a class="btn btn-sm btn-outline-dark" href="{{ route('integration.edit', $integration->uid) }}">
                                         <i class="fas fa-fw fa-edit"></i>
                                     </a>
-                                    <form action="{{ route('integration.destroy', $integration->uid) }}" 
-                                        method="POST" 
+                                    <form action="{{ route('integration.destroy', $integration->uid) }}"
+                                        method="POST"
                                         onsubmit="return confirm('Are you sure?')">
                                         @csrf
                                         @method('DELETE')
@@ -98,25 +98,51 @@
     </h5>
 </div>
 
-<div class="row g-3">
-    @foreach ($supportedIntegrations as $application)
+@php
+    $groupedSupportedIntegrations = $supportedIntegrations
+        ->sortBy(function ($application) {
+            return [
+                $application->category ?: 'other',
+                $application->name,
+            ];
+        })
+        ->groupBy(function ($application) {
+            return $application->category ?: 'other';
+        });
+@endphp
 
-        @php
-            $icon = $application->getMeta('icon')
-                ?? '<i class="fa-brands fa-whatsapp"></i>';
-        @endphp
+@forelse ($groupedSupportedIntegrations as $category => $applications)
+    <div class="mb-2">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="mb-0 text-uppercase text-muted fw-semibold">
+                {{ Str::headline($category) }}
+            </h6>
+            <x-userinterface::badge :text="(string) $applications->count()" variant="light" class="text-dark border" />
+        </div>
 
-        @include('userinterface::components.card-item', [
-            'type'        => 'integration',
-            'key'         => Str::slug($application->name),
-            'title'       => $application->name,
-            'description' => $application->getMeta('description') ?? 'No description available',
-            'icon'        => $icon,
-            'application' => $application,
-        ])
+        <div class="row g-2">
+            @foreach ($applications as $application)
+                @php
+                    $icon = $application->getMeta('icon')
+                        ?? '<i class="fa-brands fa-whatsapp"></i>';
+                @endphp
 
-    @endforeach
-</div>
+                @include('userinterface::components.card-item', [
+                    'type'        => 'integration',
+                    'key'         => Str::slug($application->name),
+                    'title'       => $application->name,
+                    'description' => $application->getMeta('description') ?? 'No description available',
+                    'icon'        => $icon,
+                    'application' => $application,
+                ])
+            @endforeach
+        </div>
+    </div>
+@empty
+    <div class="alert alert-light border text-muted mb-0">
+        No supported integrations available.
+    </div>
+@endforelse
 @endsection
 
 @push('scripts')
