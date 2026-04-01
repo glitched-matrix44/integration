@@ -42,7 +42,7 @@ class SyncVectorJob extends BaseJob
                     'read_timeout'    => 0,
                 ])
                 ->post(
-                    'https://stageapi-jobs.iquesters.com/vector/create/v1',
+                    'https://api-jobs.iquesters.com/vector/create/v1',
                     $payload
                 );
 
