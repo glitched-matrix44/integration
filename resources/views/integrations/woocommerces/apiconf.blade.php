@@ -31,6 +31,13 @@
             'icon' => 'fas fa-fw fa-screwdriver-wrench',
             'label' => 'Api Conf',
         ],
+
+        [
+        'route' => 'integration.knob',
+        'params' => ['integrationUid' => $integration->uid],
+        'icon' => 'fas fa-fw fa-sliders',
+        'label' => 'Knob',
+        ],
         [
             'route' => 'integration.syncdata',
             'params' => ['integrationUid' => $integration->uid],

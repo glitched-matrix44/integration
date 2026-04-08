@@ -49,7 +49,7 @@
             'icon' => 'fas fa-fw fa-rotate',
             'label' => 'Sync Data',
             // 'permission' => 'view-teams'
-        ]
+        ],
     ];
 @endphp
 
