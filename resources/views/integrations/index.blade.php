@@ -3,6 +3,17 @@
 @section('page-title', \Iquesters\Foundation\Helpers\MetaHelper::make(['Integration']))
 @section('meta-description', \Iquesters\Foundation\Helpers\MetaHelper::description('List of Integration'))
 
+@php
+    $tabs = [
+        [
+            'route' => 'integration.index',
+            'params' => [],
+            'icon' => 'fa-solid fa-fw fa-link',
+            'label' => 'Integrations',
+        ],
+    ];
+@endphp
+
 @section('content')
 {{-- ===================== --}}
 {{-- Connected Integrations --}}
