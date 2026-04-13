@@ -8,9 +8,12 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Iquesters\Integration\Models\Integration;
+use Iquesters\Integration\Support\VectorTelegramNotifier;
 
 class SyncVectorJob extends BaseJob
 {
+    use VectorTelegramNotifier;
+
     protected array $integrationPayload;
     protected ?\Carbon\Carbon $startedAt = null;
     protected ?int $operationId = null;
@@ -130,6 +133,7 @@ class SyncVectorJob extends BaseJob
         try {
             $finishedAt = now();
             $auditUserId = $this->resolveAuditUserId();
+            $integration = $this->resolveIntegration();
 
             $duration = $this->startedAt
                 ? abs((int) $this->startedAt->diffInSeconds($finishedAt))
@@ -151,6 +155,13 @@ class SyncVectorJob extends BaseJob
                 'updated_by'       => $auditUserId,
                 'created_at'       => now(),
                 'updated_at'       => now(),
+            ]);
+
+            $this->notifyVectorTelegram($integration, [
+                'operation_id' => $this->operationId,
+                'step_status' => $this->apiMeta['step_status'] ?? -1,
+                'status' => $this->apiMeta['status'] ?? 'failed',
+                'message' => $this->apiMeta['message'] ?? 'Vector job update',
             ]);
 
         } catch (\Throwable $e) {
@@ -270,21 +281,27 @@ class SyncVectorJob extends BaseJob
 
     private function resolveAuditUserId(): int
     {
-        $integrationId = $this->integrationPayload['integration_id'] ?? null;
-
-        if (!$integrationId) {
-            return 0;
-        }
-
-        $integration = Integration::query()
-            ->select(['id', 'created_by', 'updated_by', 'user_id'])
-            ->find($integrationId);
+        $integration = $this->resolveIntegration();
 
         if (!$integration) {
             return 0;
         }
 
         return (int) ($integration->updated_by ?: $integration->created_by ?: $integration->user_id ?: 0);
+    }
+
+    private function resolveIntegration(): ?Integration
+    {
+        $integrationId = $this->integrationPayload['integration_id'] ?? null;
+
+        if (!$integrationId) {
+            return null;
+        }
+
+        return Integration::query()
+            ->select(['id', 'created_by', 'updated_by', 'user_id'])
+            ->with('supportedIntegration')
+            ->find($integrationId);
     }
 
     private function resolveInitialStepStatus($response, mixed $responseJson): int

@@ -7,9 +7,12 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Iquesters\Foundation\Jobs\BaseJob;
 use Iquesters\Integration\Models\Integration;
+use Iquesters\Integration\Support\VectorTelegramNotifier;
 
 class SyncVectorV2OutboundJob extends BaseJob
 {
+    use VectorTelegramNotifier;
+
     protected array $payload;
 
     protected function initialize(...$arguments): void
@@ -74,6 +77,7 @@ class SyncVectorV2OutboundJob extends BaseJob
             }
 
             $auditUserId = $this->resolveAuditUserId($integrationId);
+            $integration = $this->resolveIntegration($integrationId);
 
             DB::table('vector_responses')->insert([
                 'uid' => (string) Str::ulid(),
@@ -91,6 +95,13 @@ class SyncVectorV2OutboundJob extends BaseJob
                 'updated_by' => $auditUserId,
                 'created_at' => now(),
                 'updated_at' => now(),
+            ]);
+
+            $this->notifyVectorTelegram($integration, [
+                'operation_id' => $this->resolveOperationId(),
+                'step_status' => $this->resolveStepStatus(),
+                'status' => $this->normalizeStatus(),
+                'message' => $this->resolveMessage(),
             ]);
         } catch (\Throwable $e) {
             $this->logError('Vector v2 outbound insert failed' . $this->ctx([
@@ -167,13 +178,7 @@ class SyncVectorV2OutboundJob extends BaseJob
 
     private function resolveAuditUserId(?int $integrationId): int
     {
-        if (!$integrationId) {
-            return 0;
-        }
-
-        $integration = Integration::query()
-            ->select(['id', 'created_by', 'updated_by', 'user_id'])
-            ->find($integrationId);
+        $integration = $this->resolveIntegration($integrationId);
 
         if (!$integration) {
             return 0;
@@ -181,4 +186,17 @@ class SyncVectorV2OutboundJob extends BaseJob
 
         return (int) ($integration->updated_by ?: $integration->created_by ?: $integration->user_id ?: 0);
     }
+
+    private function resolveIntegration(?int $integrationId): ?Integration
+    {
+        if (!$integrationId) {
+            return null;
+        }
+
+        return Integration::query()
+            ->select(['id', 'uid', 'name', 'created_by', 'updated_by', 'user_id', 'supported_integration_id'])
+            ->with('supportedIntegration')
+            ->find($integrationId);
+    }
+
 }
